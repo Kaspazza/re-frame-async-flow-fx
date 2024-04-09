@@ -35,14 +35,13 @@
       (fn [pred] (some pred seen-events))
       callback-preds)))
 
-
 (defn seen-any-of?
   [required-events seen-events]
   (let [callback-preds (map as-callback-pred required-events)]
     (some?
-      (some
-        (fn [pred] (some pred seen-events))
-        callback-preds))))
+     (some
+      (fn [pred] (some pred seen-events))
+      callback-preds))))
 
 
 (defn startable-rules
@@ -55,10 +54,11 @@
                   ((:when task) (:events task) now-seen-events)))))
 
 
-(def map-when->fn {:seen?        seen-all-of?
-                   :seen-both?   seen-all-of?
-                   :seen-all-of? seen-all-of?
-                   :seen-any-of? seen-any-of?})
+(def map-when->fn {:seen?                  seen-all-of?
+                   :seen-always-dispatch?  seen-all-of?
+                   :seen-both?             seen-all-of?
+                   :seen-all-of?           seen-all-of?
+                   :seen-any-of?           seen-any-of?})
 
 (defn when->fn
   [when-kw]
@@ -125,7 +125,9 @@
         get-state   (if db-path
                       (fn [db] (get-in db db-path))
                       (fn [_] @local-store))
-
+        reusable-rules (->> rules
+                            (filter #(= :seen-always-dispatch? (:when %)))
+                            (map :id))
         rules       (massage-rules rules)]       ;; all of the events referred to in the rules
     (when-not (some :halt? rules)
       (re-frame/console :warn (format "async-flow [%s] %s - has no rules with :halt?" id (system-time))))
@@ -172,7 +174,11 @@
               new-seen-events (conj seen-events forwarded-event)
               ready-rules     (startable-rules rules new-seen-events rules-fired)
               halt?           (some :halt? ready-rules)
-              ready-rules-ids (->> ready-rules (map :id) set)
+              ready-rules-ids (->> ready-rules
+                                   (map :id)
+                                   set
+                                   (filter (fn [id]
+                                             (not (some #(= id %) reusable-rules)))))
               new-rules-fired (set/union rules-fired ready-rules-ids)
               new-dispatches  (rules->dispatches ready-rules forwarded-event)
               new-db          (set-state db new-seen-events new-rules-fired)]
